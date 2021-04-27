@@ -92,6 +92,43 @@ function createNewProvisionMaterial() {
   };
 }
 
+async function getPublicKey(dataSubject, secrets, accessToken) {
+  const {
+    cryptoProvisions,
+    identityPubkey,
+  } = await httpApi.getIdentifierPublicKey(dataSubject, accessToken);
+
+  if (identityPubkey) {
+    return {
+      publicKey: identityPubkey,
+      provision: null,
+    }
+  }
+  
+  for (const provision of (cryptoProvisions || [])) {
+    const { publicKey } = provision;
+    const userKeyShare =  secrets.provisionsUserKeyShares[publicKey];
+
+    if (userKeyShare) {
+      return {
+        publicKey,
+        provision: {
+          userKeyShare,
+        }
+      }
+    }
+  }
+
+  // no existing provision worked: we create a new one
+  provision = createNewProvisionMaterial();
+  publicKey = provision.publicKey;
+  secrets.provisionsUserKeyShares[publicKey] = provision.userKeyShare;
+  return {
+    publicKey,
+    provision,
+  }
+}
+
 class Misakey {
   constructor(orgId, authSecret) {
     this.orgId = orgId;
@@ -114,38 +151,11 @@ class Misakey {
       this.accessToken = await httpApi.exchangeToken(this.orgId, this.authSecret);
     }
 
-    /*
-     * public key to send the auto-inviation to
-     * (potentially of a provision, which we may have to create)
-    */
-
-    const {
-      cryptoProvisions,
-      identityPubkey,
-    } = await httpApi.getIdentifierPublicKey(dataSubject, this.accessToken);
-
-    let publicKey;
-    let provision = {};
-    if (identityPubkey) {
-      publicKey = identityPubkey;
-    } else if (!isEmpty(cryptoProvisions)) {
-      publicKey = cryptoProvisions[0].publicKey;
-
-      const userKeyShare =  this.secrets.provisionsUserKeyShares[publicKey];
-      if (!userKeyShare) {
-        // TODO maybe create a new provision instead,
-        // or try the other provision public keys if any
-        throw Error(`could not find user key share for provision public key ${publicKey} in memory`);
-      }
-
-      provision = {
-        userKeyShare,
-      }
-    } else {
-      provision = createNewProvisionMaterial();
-      this.secrets.provisionsUserKeyShares[provision.publicKey] = provision.userKeyShare;
-      publicKey = provision.publicKey;
-    }
+    const { publicKey, provision  } = await getPublicKey(
+      dataSubject,
+      this.secrets,
+      this.accessToken
+    )
 
     /* creation of the box */
 
