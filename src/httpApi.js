@@ -2,6 +2,8 @@ const fetch = require('node-fetch');
 const FormData = require('form-data');
 
 const { default: objectToSnakeCaseDeep } = require('@misakey/core/helpers/objectToSnakeCaseDeep');
+const { default: objectToSnakeCase } = require('@misakey/core/helpers/objectToSnakeCase');
+const { default: objectToCamelCaseDeep } = require('@misakey/core/helpers/objectToCamelCaseDeep');
 
 const BASE_TARGET_DOMAIN = process.env.MISAKEY_SDK_BASE_TARGET_DOMAIN || 'misakey.com';
 const API_URL_PREFIX = `https://api.${BASE_TARGET_DOMAIN}`;
@@ -32,15 +34,40 @@ async function getDataTagID(dataTag, accessToken) {
   return body[0].id;
 }
 
-async function postBox({ orgId, dataSubject, datatagId, publicKey, keyShare, accessToken, title }) {
-  const requestJson = objectToSnakeCaseDeep({
-    title,
-    ownerOrgId: orgId,
-    dataSubject,
-    datatagId,
-    publicKey,
-    keyShare,
-  });
+async function postBox({
+  orgId, dataSubject, datatagId, publicKey, keyShare, accessToken, title,
+  invitationData, provisions,
+}) {
+  // data in the "crypto" part is a bit more difficult to convert to snake_case
+  // so we do it ourself
+  const crypto = {
+    // value is just a string, no need to convert deep
+    invitation_data: invitationData,
+  }
+
+  if (provisions) {
+    // non-trivial conversion to snake_case
+    crypto.provisions = Object.fromEntries(
+      Object.entries(provisions).map(([identifier, provision]) => (
+        // `objectToSnakeCaseDeep` would try to convert the identifier,
+        // and it would mess it up
+        [identifier, objectToSnakeCase(provision)]
+      ))
+    )
+  }
+
+  const requestJson = objectToSnakeCaseDeep(
+    {
+      title,
+      ownerOrgId: orgId,
+      dataSubject,
+      datatagId,
+      publicKey,
+      keyShare,
+      crypto,
+    },
+    { excludedKeys: ['crypto'] },
+  );
 
   const response = await fetch(
     `${API_URL_PREFIX}/organizations/${orgId}/boxes`,
@@ -172,6 +199,25 @@ async function exchangeToken(orgId, authSecret) {
   return (await response.json()).access_token;
 }
 
+async function getIdentifierPublicKey(identifier, authSecret) {
+  const response = await fetch(
+    `${API_URL_PREFIX}/identities/pubkey?identifier_value=${identifier}`,
+    {
+      headers: {
+        Authorization: `Bearer ${authSecret}`,
+      },
+    },
+  );
+
+  if (!response.ok) {
+    const error = new Error();
+    error.response = response;
+    throw error;
+  }
+
+  return objectToCamelCaseDeep(await response.json());
+}
+
 module.exports = {
   BASE_TARGET_DOMAIN,
   getDataTagID,
@@ -180,4 +226,5 @@ module.exports = {
   postFileMessage,
   getBoxMessages,
   exchangeToken,
+  getIdentifierPublicKey,
 };

@@ -27,7 +27,8 @@ Output:
 {
   boxId: 'd8dcbd74-a50e-42fb-a25d-1618f07da4f4',
   datatagId: '35aec043-bb95-4c93-8d1b-e311021baba1',
-  invitationLink: 'https://app.misakey.com/boxes/d8dcbd74-a50e-42fb-a25d-1618f07da4f4#h_iSvbUr_3wnNQ6SK6-p6hS2U9xXbuzFYewxJz2jIwY'
+  invitationLink: 'https://app.misakey.com/boxes/d8dcbd74-a50e-42fb-a25d-1618f07da4f4#h_iSvbUr_3wnNQ6SK6-p6hS2U9xXbuzFYewxJz2jIwY',
+  dataSubjectNeedsLink: true
 }
 ```
 
@@ -45,13 +46,36 @@ that exports the variables it needs:
 ```javascript
 // file: example-variables.js
 module.exports = {
-  ORG_ID: 'dec34530-1e71-4831-9f6f-b3cba469e241',
-  ORG_AUTH_SECRET: 'xJE1AQM+xYoZhm+PiULrTBva//IwT1uu6fYrlOm3E4U=',
-  TEXT_MESSAGES: 'Here is your pay stub',
-  PATH_TO_FILE: '/var/data/pay-stub-of-michel-at-misakey-dot-com.pdf',
+  ORG_ID: 'c83c496f-b801-465c-a678-4616fa9fd36f',
+  ORG_AUTH_SECRET: 'nDUJ4hIYsbrfFJ0QBkQUWQB8/giwapLHAqJ6IQpgd0Y=',
   DATA_SUBJECT: 'michel@misakey.com',
-  DATATAG: 'salary',
-  BOX_TITLE: 'Pay Stub of michel@misakey.com',
+  BOXES: [
+    {
+      title: 'Your Contract',
+      dataTag: 'contract',
+      messages: [
+        'Please find below your contract:',
+        {
+          pathToFile: '/var/data/contracts/michel-at-misakey-dot-com.pdf',
+        },
+        'Thank you for choosing us.',
+      ]
+    },
+    {
+      title: 'Your order',
+      dataTag: 'purchase',
+      messages: [
+        'Hi, please find below your receipt and other related documents',
+        {
+          pathToFile: '/var/data/purchases/1D6FC90D5/receipt.pdf',
+        },
+        {
+          pathToFile: '/var/data/purchases/1D6FC90D5/infalatable-unicorn-user-manual.pdf',
+        },
+        'Thanks for shopping with us ☺.',
+      ]
+    }
+  ],
 };
 ```
 
@@ -60,6 +84,7 @@ $ MISAKEY_SDK_BASE_TARGET_DOMAIN=misakey.com.local node example.js
 {
   boxId: '89defdad-d913-4bfa-8648-41328748188f',
   datatagId: '35aec043-bb95-4c93-8d1b-e311021baba1',
-  invitationLink: 'https://app.misakey.com.local/boxes/89defdad-d913-4bfa-8648-41328748188f#j_NzjPZd6iDGE5uXzGlvuMS1EeSkMHYuOMRtFXSFZHU'
+  invitationLink: 'https://app.misakey.com.local/boxes/89defdad-d913-4bfa-8648-41328748188f#j_NzjPZd6iDGE5uXzGlvuMS1EeSkMHYuOMRtFXSFZHU',
+  dataSubjectNeedsLink: true
 }
 ```
