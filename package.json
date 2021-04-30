@@ -1,6 +1,6 @@
 {
   "name": "@misakey/sdk",
-  "version": "0.2.6",
+  "version": "0.3.0",
   "description": "The Misakey SDK",
   "main": "build/index.js",
   "repository": "https://github.com/misakey/frontend",
@@ -11,7 +11,7 @@
     "build": "npx babel src --out-dir build"
   },
   "dependencies": {
-    "@misakey/core": "^0.1.5",
+    "@misakey/core": "^0.3.0",
     "form-data": "^4.0.0",
     "mime-types": "^2.1.30",
     "node-fetch": "^2.6.1"
@@ -19,6 +19,7 @@
   "devDependencies": {
     "@babel/cli": "^7.13.14",
     "@babel/core": "^7.13.15",
-    "@babel/preset-env": "^7.13.15"
+    "@babel/preset-env": "^7.13.15",
+    "eslint": "^7.24.0"
   }
 }

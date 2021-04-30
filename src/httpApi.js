@@ -1,11 +1,15 @@
 const fetch = require('node-fetch');
 const FormData = require('form-data');
 
-const { default: objectToSnakeCaseDeep } = require('@misakey/core/helpers/objectToSnakeCaseDeep');
 const { default: objectToSnakeCase } = require('@misakey/core/helpers/objectToSnakeCase');
+const { default: objectToCamelCase } = require('@misakey/core/helpers/objectToCamelCase');
+const { default: objectToSnakeCaseDeep } = require('@misakey/core/helpers/objectToSnakeCaseDeep');
 const { default: objectToCamelCaseDeep } = require('@misakey/core/helpers/objectToCamelCaseDeep');
+const { default: snakeCase } = require('@misakey/core/helpers/snakeCase');
+const { default: isNil } = require('@misakey/core/helpers/isNil');
 
-const BASE_TARGET_DOMAIN = process.env.MISAKEY_SDK_BASE_TARGET_DOMAIN || 'misakey.com';
+const BASE_TARGET_DOMAIN_DEFAULT = `misakey.com${process.env.NODE_ENV === 'production' ? '' : '.local'}`;
+const BASE_TARGET_DOMAIN = process.env.MISAKEY_SDK_BASE_TARGET_DOMAIN || BASE_TARGET_DOMAIN_DEFAULT;
 const API_URL_PREFIX = `https://api.${BASE_TARGET_DOMAIN}`;
 const AUTH_URL_PREFIX = `https://auth.${BASE_TARGET_DOMAIN}`;
 
@@ -43,7 +47,7 @@ async function postBox({
   const crypto = {
     // value is just a string, no need to convert deep
     invitation_data: invitationData,
-  }
+  };
 
   if (provisions) {
     // non-trivial conversion to snake_case
@@ -53,7 +57,7 @@ async function postBox({
         // and it would mess it up
         [identifier, objectToSnakeCase(provision)]
       ))
-    )
+    );
   }
 
   const requestJson = objectToSnakeCaseDeep(
@@ -175,18 +179,12 @@ async function getBoxMessages(boxId, accessToken) {
   return body;
 }
 
-async function exchangeToken(orgId, authSecret) {
-  const form = new FormData();
-  form.append('grant_type', 'client_credentials');
-  form.append('scope', '');
-  form.append('client_id', orgId);
-  form.append('client_secret', authSecret);
-
+async function exchangeToken(body) {
   const response = await fetch(
     `${AUTH_URL_PREFIX}/_/oauth2/token`,
     {
       method: 'POST',
-      body: form,
+      body,
     },
   );
 
@@ -196,7 +194,32 @@ async function exchangeToken(orgId, authSecret) {
     throw error;
   }
 
-  return (await response.json()).access_token;
+  return objectToCamelCase(await response.json());
+}
+
+
+async function exchangeOrgToken(orgId, authSecret) {
+  const form = new FormData();
+  form.append('grant_type', 'client_credentials');
+  form.append('scope', '');
+  form.append('client_id', orgId);
+  form.append('client_secret', authSecret);
+
+  const { accessToken } = await exchangeToken(form);
+  return accessToken;
+}
+
+async function exchangeUserToken(body) {
+  const form = new FormData();
+  form.append('grant_type', 'authorization_code');
+  
+  Object.entries(body).forEach(([key, value]) => {
+    if (!isNil(value)) {
+      form.append(snakeCase(key), value);
+    }
+  });
+
+  return exchangeToken(form);
 }
 
 async function getIdentifierPublicKey(identifier, authSecret) {
@@ -220,11 +243,13 @@ async function getIdentifierPublicKey(identifier, authSecret) {
 
 module.exports = {
   BASE_TARGET_DOMAIN,
+  AUTH_URL_PREFIX,
   getDataTagID,
   postBox,
   postTextMessage,
   postFileMessage,
   getBoxMessages,
-  exchangeToken,
   getIdentifierPublicKey,
+  exchangeOrgToken,
+  exchangeUserToken,
 };
