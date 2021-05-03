@@ -223,7 +223,7 @@ class MisakeyServer {
       dataSubject,
       dataTag,
       dataSubjectPublicKey: publicKey,
-      provisionPayload: provision.creationPayload,
+      provisionPayload: provision ? provision.creationPayload : null,
       orgId: this.orgId,
       accessToken: this.accessToken,
     });
