@@ -16,8 +16,6 @@ class MisakeyClient {
   }
 
   async userConsent(dataSubject, scopes = [], authProps) {
-    if (!scopes.includes('openid')) { scopes.push('openid'); }
-    
     return this.userManager.signinRedirect({
       ...authProps,
       scope: scopes.join(' '),

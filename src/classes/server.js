@@ -151,27 +151,21 @@ class MisakeyServer {
     const paramsError = validateProperties({ params, redirectUri });
     if (paramsError) { return Promise.reject(paramsError); }
 
-    const { error, errorDebug, errorHint, code, state, codeVerifier, scope } = params;
+    const { error, errorDebug, errorHint, error_description, code, state, codeVerifier, scope } = params;
 
     if (!isNil(error)) {
-      const description = isNil(errorDebug) ? errorHint : errorDebug;
+      const description = isNil(errorDebug) ? (isNil(error_description) ? errorHint : error_description) : errorDebug;
       throw new Error(`${error} - ${description}`);
     }
 
     const err = validateProperties({ state, code });
     if (err) { return Promise.reject(err); }
 
-    const scopes = scope.split(' ');
-    // ensure `openid` scope is part of the authorization process
-    if (!scopes.includes('openid')) {
-      scopes.push('openid');
-    }
-
     try {
       const { idToken, expiresIn, ...rest } = await httpApi.exchangeUserToken({
         clientId: this.orgId,
         clientSecret: this.authSecret,
-        scope: scopes.join(' '),
+        scope,
         codeVerifier,
         code,
         redirectUri
