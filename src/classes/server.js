@@ -7,28 +7,73 @@ const { default: assertNotAnyNil } = require('@misakey/core/crypto/helpers/asser
 const { createCryptoForNewBox } = require('@misakey/core/crypto/box/creation');
 const { default: encryptText } = require('@misakey/core/crypto/box/encryptText');
 const { default: encryptFile } = require('@misakey/core/crypto/box/encryptFile');
-const { encryptCryptoaction } = require('@misakey/core/crypto/cryptoactions');
-const { generateAsymmetricKeyPair } = require('@misakey/core/crypto/crypto');
+const { encryptCryptoaction, decryptCryptoaction } = require('@misakey/core/crypto/cryptoactions');
+const { generateAsymmetricKeyPair, keyPairFromSecretKey } = require('@misakey/core/crypto/crypto');
 const { splitKey } = require('@misakey/core/crypto/crypto/keySplitting');
 const { default: isNil } = require('@misakey/core/helpers/isNil');
 const { default: validateProperties } = require('@misakey/core/helpers/validateProperties');
 const { default: log } = require('@misakey/core/helpers/log');
+const { default: decryptText } = require('@misakey/core/crypto/box/decryptText');
+const {
+  decryptSecretWithRootKey,
+} = require('@misakey/core/crypto/secretStorage');
 
 const httpApi = require('../httpApi');
 
+function ensureConsentPublicKey({ existingConsentPublicKey, dataSubjectPublicKey }) {
+  if (existingConsentPublicKey) {
+    return {
+      consentPublicKey: existingConsentPublicKey,
+      newConsentKey: null,
+    }
+  }
+
+  const {
+    secretKey: consentSecretKey,
+    publicKey: consentPublicKey
+  } = generateAsymmetricKeyPair();
+
+  return {
+    consentPublicKey,
+    newConsentKey: {
+      publicKey: consentPublicKey,
+      encryptedSecretKey: {
+        // this is actually a cryptoaction
+        // (the backend will create a cryptoaction for the data subject from this value)
+        encrypted: encryptCryptoaction(
+          { consentSecretKey },
+          dataSubjectPublicKey,
+        ),
+        encryptionPublicKey: dataSubjectPublicKey,
+      }
+    }
+  }
+}
+
 async function createBox({
-  title, dataSubject, dataTag,
-  dataSubjectPublicKey, provisionPayload,
+  title, dataSubject, datatagId,
+  dataSubjectPublicKey, provisionPayload, existingConsentPublicKey,
   orgId, accessToken,
 }) {
-  const datatagId = await httpApi.getDataTagID(dataTag, accessToken);
-
   const {
     boxPublicKey,
     boxSecretKey,
     invitationKeyShare,
     misakeyKeyShare,
   } = createCryptoForNewBox();
+
+  const { consentPublicKey, newConsentKey } = ensureConsentPublicKey({ existingConsentPublicKey, dataSubjectPublicKey });
+
+  const consentEncryptedSecretKey = {
+    // this is the same exact format as a cryptoaction
+    // but this value is not distributed through the cryptoaction mechanism in the backend
+    // so we don't use `encryptCryptoaction` because this would be confusing
+    encrypted: encryptText(
+      JSON.stringify({ boxSecretKey }),
+      consentPublicKey,
+    ),
+    encryptionPublicKey: consentPublicKey,
+  }
 
   const invitationData = {
     [dataSubjectPublicKey]: encryptCryptoaction(
@@ -51,14 +96,16 @@ async function createBox({
 
   const box = await httpApi.postBox({
     orgId,
+    title,
     dataSubject,
     datatagId,
     publicKey: boxPublicKey,
+    consentEncryptedSecretKey,
     keyShare: misakeyKeyShare,
-    accessToken,
-    title,
     invitationData,
     provisions,
+    newConsentKey,
+    accessToken,
   });
 
   return {
@@ -69,13 +116,47 @@ async function createBox({
   };
 }
 
+async function loadSecretStorage(accountRootKey, accessToken) {
+  const encryptedSecretStorage = await httpApi.getSecretStorage(accessToken);
 
-async function getPublicKey(dataSubject, secrets, accessToken) {
-  const {
-    cryptoProvisions,
-    identityPubkey,
-  } = await httpApi.getIdentifierPublicKey(dataSubject, accessToken);
+  // TODO make and use a function `decryptAsymKeysWithRootKey` in core
+  // (extract from decryptSecretStorageWithRootKey)
+  return {
+    asymKeys: (
+      Object.fromEntries(Object.entries(encryptedSecretStorage.asymKeys).map(([publicKey, obj]) => {
+        const secretKey = decryptSecretWithRootKey(obj.encryptedSecretKey, accountRootKey)
+        return [publicKey, secretKey];
+      }))
+    ),
+  }
+}
 
+async function loadConsentKeysFromCryptoActions(accountId, currentAsymKeys, accessToken) {
+  const cryptoActions = await httpApi.getCryptoActions(accountId, accessToken);
+
+  const newAsymKeys = {};
+  cryptoActions.forEach((cryptoAction) => {
+    const { type, encrypted, encryptionPublicKey } = cryptoAction;
+
+    if (type !== 'consent_key') {
+      return;
+    }
+
+    const secretKey = currentAsymKeys[encryptionPublicKey];
+    if (isEmpty(secretKey)) {
+      throw new Error(`no secret key for public key ${encryptionPublicKey}`)
+    }
+
+    const { consentSecretKey } = decryptCryptoaction(encrypted, secretKey);
+    const { publicKey } = keyPairFromSecretKey(consentSecretKey);
+
+    newAsymKeys[publicKey] = consentSecretKey;
+  });
+
+  return newAsymKeys;
+}
+
+async function getPublicKey(identityPubkey, cryptoProvisions, secrets) {
   if (identityPubkey) {
     return {
       publicKey: identityPubkey,
@@ -134,13 +215,14 @@ function createNewProvisionMaterial() {
 }
 
 class MisakeyServer {
-  constructor(orgId, authSecret) {
-    const err = validateProperties({ orgId, authSecret });
+  constructor(orgId, authSecret, cryptoSecret) {
+    const err = validateProperties({ orgId, authSecret, cryptoSecret });
     if (err) { throw err; }
 
     this.orgId = orgId;
     this.authSecret = authSecret;
     this.accessToken = null;
+    this.cryptoSecret = cryptoSecret;
     this.secrets = {
       // mapping from public key to user key share
       provisionsUserKeyShares: {},
@@ -199,25 +281,32 @@ class MisakeyServer {
       this.accessToken = await httpApi.exchangeOrgToken(this.orgId, this.authSecret);
     }
 
+    const {
+        datatagId,
+        cryptoProvisions,
+        identityPubkey,
+        consentPublicKey: existingConsentPublicKey,
+    } = await httpApi.getDataTagCrypto(dataTag, dataSubject, this.accessToken);
+
     const { publicKey, provision  } = await getPublicKey(
-      dataSubject,
+      identityPubkey,
+      cryptoProvisions,
       this.secrets,
-      this.accessToken
     );
 
     /* creation of the box */
 
     const {
       boxId,
-      datatagId,
       boxPublicKey,
       invitationKeyShare,
     } = await createBox({
       title: boxTitle,
       dataSubject,
-      dataTag,
+      datatagId,
       dataSubjectPublicKey: publicKey,
       provisionPayload: provision ? provision.creationPayload : null,
+      existingConsentPublicKey,
       orgId: this.orgId,
       accessToken: this.accessToken,
     });
@@ -277,6 +366,56 @@ class MisakeyServer {
       dataSubjectNeedsLink: !isEmpty(provision)
     };
   }
+
+  async getData(dataSubject, datatag, producerOrgId) {
+    // TODO better parallelism
+    const secretStorage = await loadSecretStorage(this.cryptoSecret, this.accessToken);
+    console.log({ secretStorage });
+    const { accountId } = await httpApi.getIdentity(this.orgId, this.accessToken);
+    const asymKeysMapping = await loadConsentKeysFromCryptoActions(accountId, secretStorage.asymKeys, this.accessToken);
+    console.log({ asymKeysMapping });
+
+    const {
+      datatagId
+    } = await httpApi.getDataTagCrypto(datatag, dataSubject, this.accessToken)
+
+    const boxes = await httpApi.listBoxes(dataSubject, datatagId, producerOrgId, this.accessToken);
+
+    // decrypting box secret keys
+    boxes.forEach((box) => {
+      const {
+        consentEncryptedSecretKey: {
+          encryptionPublicKey,
+          encrypted,
+        },
+        publicKey,
+      } = box;
+
+      const secretKey = asymKeysMapping[encryptionPublicKey];
+      if (isEmpty(secretKey)) {
+        throw new Error(`no secret key for public key ${encryptionPublicKey}`)
+      }
+
+      const { boxSecretKey } = JSON.parse(decryptText(encrypted, secretKey));
+
+      // we already have the box public key, this is just a check
+      const { publicKey: rebuiltPublicKey } = keyPairFromSecretKey(boxSecretKey);
+      if (rebuiltPublicKey !== publicKey) {
+        throw new Error(`rebuilt public key (${rebuiltPublicKey}) different from "official" box public key (${publicKey})`)
+      }
+
+      asymKeysMapping[publicKey] = boxSecretKey;
+    })
+
+    console.log({ boxes });
+    console.log({ asymKeysMapping });
+
+    // TODO decrypt box content using box secret keys
+  }
 }
 
-module.exports = MisakeyServer;
+module.exports = {
+  MisakeyServer,
+  // exported because Mijaspy needs it
+  loadConsentKeysFromCryptoActions,
+};

@@ -1,4 +1,4 @@
-const MisakeyServer = require('./classes/server');
+const { MisakeyServer } = require('./classes/server');
 const MisakeyClient = require('./classes/client');
 
 module.exports = MisakeyServer;

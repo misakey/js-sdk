@@ -7,21 +7,23 @@ const { default: objectToSnakeCaseDeep } = require('@misakey/core/helpers/object
 const { default: objectToCamelCaseDeep } = require('@misakey/core/helpers/objectToCamelCaseDeep');
 const { default: snakeCase } = require('@misakey/core/helpers/snakeCase');
 const { default: isNil } = require('@misakey/core/helpers/isNil');
+const { default: isEmpty } = require('@misakey/core/helpers/isEmpty');
 
 const BASE_TARGET_DOMAIN_DEFAULT = `misakey.com${process.env.NODE_ENV === 'production' ? '' : '.local'}`;
 const BASE_TARGET_DOMAIN = process.env.MISAKEY_SDK_BASE_TARGET_DOMAIN || BASE_TARGET_DOMAIN_DEFAULT;
 const API_URL_PREFIX = `https://api.${BASE_TARGET_DOMAIN}`;
 const AUTH_URL_PREFIX = `https://auth.${BASE_TARGET_DOMAIN}`;
 
-async function getDataTagID(dataTag, accessToken) {
+
+async function getDataTagCrypto(dataTag, dataSubject, accessToken) {
   const response = await fetch(
-    `${API_URL_PREFIX}/datatags?names=${dataTag}`,
+    `${API_URL_PREFIX}/datatags/crypto?datatag_name=${dataTag}&data_subject=${dataSubject}`,
     {
       headers: {
         Authorization: `Bearer ${accessToken}`,
       },
     },
-  );
+  )
 
   if (!response.ok) {
     const error = new Error();
@@ -29,18 +31,33 @@ async function getDataTagID(dataTag, accessToken) {
     throw error;
   }
 
-  const body = await response.json();
+  const responseJson = await response.json();
 
-  if (body.length === 0) {
-    throw Error(`Datatag not found: ${dataTag}`);
+  const {
+    datatag: {
+      id: datatagId,
+    },
+    dataSubjectIdentityPublicKeys: {
+      cryptoProvisions,
+      identityPubkey,
+    },
+    consentPublicKey,
+  } = objectToCamelCaseDeep(responseJson);
+
+  return {
+    datatagId,
+    cryptoProvisions,
+    identityPubkey,
+    consentPublicKey,
   }
-
-  return body[0].id;
 }
 
 async function postBox({
-  orgId, dataSubject, datatagId, publicKey, keyShare, accessToken, title,
-  invitationData, provisions,
+  orgId, title, dataSubject, datatagId,
+  publicKey, consentEncryptedSecretKey,
+  keyShare,
+  invitationData, provisions, newConsentKey,
+  accessToken,
 }) {
   // data in the "crypto" part is a bit more difficult to convert to snake_case
   // so we do it ourself
@@ -49,7 +66,7 @@ async function postBox({
     invitation_data: invitationData,
   };
 
-  if (provisions) {
+  if (!isEmpty(provisions)) {
     // non-trivial conversion to snake_case
     crypto.provisions = Object.fromEntries(
       Object.entries(provisions).map(([identifier, provision]) => (
@@ -60,6 +77,11 @@ async function postBox({
     );
   }
 
+  if (!isEmpty(newConsentKey)) {
+    // this case conversion, however, is trivial
+    crypto.new_consent_key = objectToSnakeCaseDeep(newConsentKey);
+  }
+
   const requestJson = objectToSnakeCaseDeep(
     {
       title,
@@ -67,6 +89,7 @@ async function postBox({
       dataSubject,
       datatagId,
       publicKey,
+      consentEncryptedSecretKey,
       keyShare,
       crypto,
     },
@@ -241,10 +264,85 @@ async function getIdentifierPublicKey(identifier, authSecret) {
   return objectToCamelCaseDeep(await response.json());
 }
 
+async function getSecretStorage(accessToken) {
+  const response = await fetch(
+    `${API_URL_PREFIX}/crypto/secret-storage`,
+    {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    },
+  )
+  if (!response.ok) {
+    const error = new Error();
+    error.response = response;
+    throw error;
+  }
+
+  return objectToCamelCaseDeep(await response.json(), { ignoreBase64: true });
+}
+
+async function getIdentity(identityId, accessToken) {
+  const response = await fetch(
+    `${API_URL_PREFIX}/identities/${identityId}`,
+    {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    },
+  )
+  if (!response.ok) {
+    const error = new Error();
+    error.response = response;
+    throw error;
+  }
+
+  return objectToCamelCaseDeep(await response.json());
+}
+
+async function getCryptoActions(accountId, accessToken) {
+  const response = await fetch(
+    `${API_URL_PREFIX}/accounts/${accountId}/crypto/actions`,
+    {
+      headers: {
+        // TODO stop using CSRF token
+        // when backend allows it (see https://gitlab.misakey.dev/misakey/backend/-/merge_requests/382)
+        'X-CSRF-Token': 'valueDoesNotMatter',
+        Cookie: `_csrf=valueDoesNotMatter; accesstoken=${accessToken}; tokentype=bearer`,
+      }
+    }
+  )
+  if (!response.ok) {
+    const error = new Error();
+    error.response = response;
+    throw error;
+  }
+
+  return objectToCamelCaseDeep(await response.json());
+}
+
+async function listBoxes(dataSubject, datatagId, producerOrgId, accessToken) {
+  const response = await fetch(
+    `${API_URL_PREFIX}/boxes?data_subject=${dataSubject}&datatag_ids=${datatagId}&owner_org_id=${producerOrgId}`,
+    {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    },
+  )
+  if (!response.ok) {
+    const error = new Error();
+    error.response = response;
+    throw error;
+  }
+
+  return objectToCamelCaseDeep(await response.json());
+}
+
 module.exports = {
   BASE_TARGET_DOMAIN,
   AUTH_URL_PREFIX,
-  getDataTagID,
+  getDataTagCrypto,
   postBox,
   postTextMessage,
   postFileMessage,
@@ -252,4 +350,8 @@ module.exports = {
   getIdentifierPublicKey,
   exchangeOrgToken,
   exchangeUserToken,
+  getSecretStorage,
+  getIdentity,
+  getCryptoActions,
+  listBoxes,
 };
