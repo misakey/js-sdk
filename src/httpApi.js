@@ -10,7 +10,9 @@ const { default: isNil } = require('@misakey/core/helpers/isNil');
 const { default: isEmpty } = require('@misakey/core/helpers/isEmpty');
 
 const BASE_TARGET_DOMAIN_DEFAULT = `misakey.com${process.env.NODE_ENV === 'production' ? '' : '.local'}`;
-const BASE_TARGET_DOMAIN = process.env.MISAKEY_SDK_BASE_TARGET_DOMAIN || BASE_TARGET_DOMAIN_DEFAULT;
+// @FIXME: find a better way to manage that in preprod
+// const BASE_TARGET_DOMAIN = process.env.MISAKEY_SDK_BASE_TARGET_DOMAIN || BASE_TARGET_DOMAIN_DEFAULT;
+const BASE_TARGET_DOMAIN = process.env.MISAKEY_SDK_BASE_TARGET_DOMAIN ||  process.env.REACT_APP_MISAKEY_SDK_BASE_TARGET_DOMAIN || BASE_TARGET_DOMAIN_DEFAULT;
 const API_URL_PREFIX = `https://api.${BASE_TARGET_DOMAIN}`;
 const AUTH_URL_PREFIX = `https://auth.${BASE_TARGET_DOMAIN}`;
 
