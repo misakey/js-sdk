@@ -355,10 +355,14 @@ class MisakeyServer {
     const invitationFragment = isEmpty(provision)
       ? invitationKeyShare
       : `provision:${provision.userKeyShare}`;
-    const invitationLink = (
-      `https://app.${httpApi.BASE_TARGET_DOMAIN}/boxes/${boxId}#${invitationFragment}`
-    );
-
+    const invitationPathname = `/boxes/${boxId}#${invitationFragment})`;
+    const invitationUrl = new URL('signIn',  `https://app.${httpApi.BASE_TARGET_DOMAIN}`);
+    invitationUrl.searchParams.append('targetPathname', invitationPathname);
+    invitationUrl.searchParams.append('misakeyCallbackHints', JSON.stringify({ shouldCreateAccount: true }));
+    invitationUrl.searchParams.append('loginHint', dataSubject);
+      
+    const invitationLink = invitationUrl.toString();
+  
     return {
       boxId,
       datatagId,

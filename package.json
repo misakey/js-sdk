@@ -1,9 +1,9 @@
 {
   "name": "@misakey/sdk",
-  "version": "0.3.5",
+  "version": "0.3.8",
   "description": "The Misakey SDK",
   "main": "build/index.js",
-  "repository": "https://github.com/misakey/frontend",
+  "repository": "https://github.com/misakey/misakey-js-sdk",
   "author": "The Misakey team",
   "license": "MIT",
   "private": false,

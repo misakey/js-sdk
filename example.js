@@ -11,6 +11,7 @@ const Misakey = require('./src');
 const {
   ORG_ID,
   ORG_AUTH_SECRET,
+  ORG_CRYPTO_SECRET,
   BOXES,
   DATA_SUBJECT,
 } = require('./example-variables');
@@ -19,6 +20,7 @@ const {
 Object.entries({
   ORG_ID,
   ORG_AUTH_SECRET,
+  ORG_CRYPTO_SECRET, 
   BOXES,
   DATA_SUBJECT,
 }).forEach(([name, value]) => {
@@ -68,7 +70,7 @@ async function main(misakey, box) {
 if (require.main === module) {
   (async () => {
     try {
-      const misakey = new Misakey(ORG_ID, ORG_AUTH_SECRET);
+      const misakey = new Misakey(ORG_ID, ORG_AUTH_SECRET, ORG_CRYPTO_SECRET);
       for (const box of BOXES) {
         const { boxInfo } = await main(misakey, box);
         console.log(boxInfo);
