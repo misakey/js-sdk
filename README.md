@@ -1,12 +1,14 @@
 # The Misakey SDK
 
-A NodeJS package that lets you send text messages and files to users through Misakey.
+A NodeJS package that lets you send and get text messages and files to users through Misakey.
+
+Sending messages:
 
 ```javascript
 const fs = require('fs');
 const Misakey = require('@misakey/sdk');
 
-const misakey = new Misakey(YOUR_ORG_ID, YOUR_ORG_AUTH_SECRET);
+const misakey = new Misakey(YOUR_ORG_ID, YOUR_ORG_AUTH_SECRET, YOUR_ORG_CRYPTO_SECRET);
 misakey.pushMessages({
   messages: [
     `Hello ${DATA_SUBJECT}, here is your data :-)`,
@@ -32,10 +34,94 @@ Output:
 }
 ```
 
+Reading text and files from all boxes for a given datatag, data subject and data producing org:
+
+```javascript
+// note: data subject must given her consent for you to get this data
+misakey.getData(DATA_SUBJECT, DATATAG, PRODUCER_ORG_ID).then((data) => console.log(data));
+```
+
+Output:
+
+```
+{
+  boxes: [
+    {
+      id: '4b2ea2c7-e0d0-427e-baec-6e7244e43de9',
+      title: 'Your purchase data',
+      creationDate: '2021-05-17T13:45:11.833176Z',
+      messages: [
+        {
+          id: '535b9383-b770-447d-ba2d-3c2fa90d406f',
+          date: '2021-05-17T13:45:11.907809Z',
+          type: 'file',
+          file: {
+            name: 'purchase-by-michel.pdf',
+            data: Uint8Array(4171) [
+               37,  80,  68,  70,  45,  49,  46,  53,  10,  37, 181, 237,
+              174, 251,  10,  52,  32,  48,  32, 111,  98, 106,  10,  60,
+               60,  32,  47,  76, 101, 110, 103, 116, 104,  32,  53,  32,
+               48,  32,  82,  10,  32,  32,  32,  47,  70, 105, 108, 116,
+              101, 114,  32,  47,  70, 108,  97, 116, 101,  68, 101,  99,
+              111, 100, 101,  10,  62,  62,  10, 115, 116, 114, 101,  97,
+              109,  10, 120, 156, 109,  90,  75, 174, 228, 176,  13, 220,
+              251,  20, 125, 129, 116, 172, 191, 116, 140,  28,  33, 104,
+               32, 201, 226, 189,
+              ... 4071 more items
+            ]
+          }
+        },
+        {
+          id: 'd1f1be5b-705d-44a5-b793-58157d954519',
+          date: '2021-05-17T13:45:11.881925Z',
+          type: 'text',
+          text: "Hello michel@misakey.com, here is your data :-)"
+        }
+      ]
+    },
+    {
+      id: '14621651-d99f-443f-816f-9ce0d8c868cd',
+      title: 'Data for another purchase',
+      creationDate: '2021-05-17T13:45:11.743996Z',
+      messages: [
+        {
+          id: '9967f072-9d81-4fab-b685-a243679174d3',
+          date: '2021-05-17T13:45:11.807566Z',
+          type: 'file',
+          file: {
+            name: 'yet-another-receipt.pdf',
+            data: Uint8Array(4171) [
+               37,  80,  68,  70,  45,  49,  46,  53,  10,  37, 181, 237,
+              174, 251,  10,  52,  32,  48,  32, 111,  98, 106,  10,  60,
+               60,  32,  47,  76, 101, 110, 103, 116, 104,  32,  53,  32,
+               48,  32,  82,  10,  32,  32,  32,  47,  70, 105, 108, 116,
+              101, 114,  32,  47,  70, 108,  97, 116, 101,  68, 101,  99,
+              111, 100, 101,  10,  62,  62,  10, 115, 116, 114, 101,  97,
+              109,  10, 120, 156, 109,  90,  75, 174, 228, 176,  13, 220,
+              251,  20, 125, 129, 116, 172, 191, 116, 140,  28,  33, 104,
+               32, 201, 226, 189,
+              ... 4071 more items
+            ]
+          }
+        },
+        {
+          id: 'dbac8d0e-d71c-41ee-8cba-bd88821408ed',
+          date: '2021-05-17T13:45:11.780324Z',
+          type: 'text',
+          text: 'Thank you for shopping with us so frequently!'
+        }
+      ]
+    }
+  ]
+}
+```
+
 If you want to point to a different base domain that `misakey.com`
 (typically, to point to a test/demo domain)
 you can do so by setting environment variable `MISAKEY_SDK_BASE_TARGET_DOMAIN`.
 
+Another environment variable you can use is `NODE_DEBUG=misakey-sdk`
+which will turn debug logging on.
 
 See also example file `example.js`.
 Note that it *requires* `MISAKEY_SDK_BASE_TARGET_DOMAIN` to be set,

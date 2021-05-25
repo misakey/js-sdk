@@ -1,12 +1,16 @@
 const mime = require('mime-types');
+const util = require('util');
 
 const { default: isArray } = require('@misakey/core/helpers/isArray');
 const { default: isEmpty } = require('@misakey/core/helpers/isEmpty');
+const { default: compact } = require('@misakey/core/helpers/compact');
 const { default: assertNotAnyNil } = require('@misakey/core/crypto/helpers/assertNotAnyNil');
 
 const { createCryptoForNewBox } = require('@misakey/core/crypto/box/creation');
 const { default: encryptText } = require('@misakey/core/crypto/box/encryptText');
 const { default: encryptFile } = require('@misakey/core/crypto/box/encryptFile');
+const { default: decryptFileMsg } = require('@misakey/core/crypto/box/decryptFileMsg');
+const { default: decryptFile } = require('@misakey/core/crypto/box/decryptFile');
 const { encryptCryptoaction, decryptCryptoaction } = require('@misakey/core/crypto/cryptoactions');
 const { generateAsymmetricKeyPair, keyPairFromSecretKey } = require('@misakey/core/crypto/crypto');
 const { splitKey } = require('@misakey/core/crypto/crypto/keySplitting');
@@ -19,6 +23,10 @@ const {
 } = require('@misakey/core/crypto/secretStorage');
 
 const httpApi = require('../httpApi');
+
+// debuglog is a no-op
+// unless node was run with "NODE_DEBUG=misakey-sdk" in its environment
+const debuglog = util.debuglog('misakey-sdk');
 
 function ensureConsentPublicKey({ existingConsentPublicKey, dataSubjectPublicKey }) {
   if (existingConsentPublicKey) {
@@ -136,7 +144,17 @@ async function loadConsentKeysFromCryptoActions(accountId, currentAsymKeys, acce
 
   const newAsymKeys = {};
   cryptoActions.forEach((cryptoAction) => {
-    const { type, encrypted, encryptionPublicKey } = cryptoAction;
+    const { id, type, encrypted, encryptionPublicKey } = cryptoAction;
+
+    if (!encrypted) {
+      debuglog('skipping crypto action %s with empty "encrypted" field', id)
+      return;
+    }
+
+    if (!encryptionPublicKey) {
+      debuglog('skipping crypto action %s with empty "encryptionPublicKey" field', id)
+      return;
+    }
 
     if (type !== 'consent_key') {
       return;
@@ -214,14 +232,102 @@ function createNewProvisionMaterial() {
   };
 }
 
+async function decryptBoxMessage({ event, boxSecretKey, boxPublicKey }, accessToken) {
+  const {
+    id,
+    serverEventCreatedAt,
+    type,
+    content: {
+      encrypted,
+      publicKey: encryptionPublicKey,
+      encryptedFileId,
+    },
+  } = event;
+
+  if (encryptionPublicKey !== boxPublicKey) {
+    throw Error(`unexpected encryption public key for box event ${id}`)
+  }
+
+  if (type === 'msg.text') {
+    return {
+      id,
+      date: serverEventCreatedAt,
+      type: 'text',
+      text: decryptText(encrypted, boxSecretKey),
+    }
+  } else if (type === 'msg.file') {
+    const decryptedFileMessageContent = decryptFileMsg(encrypted, boxSecretKey);
+    const {
+      fileName,
+    } = decryptedFileMessageContent;
+
+    const encryptedFileData = await httpApi.getEncryptedFile(encryptedFileId, accessToken);
+    const fileData = await decryptFile(encryptedFileData, decryptedFileMessageContent);
+
+    return {
+      id,
+      date: serverEventCreatedAt,
+      type: 'file',
+      file: {
+        name: fileName,
+        data: fileData,
+      }
+    }
+  }
+}
+
+async function decryptBox({ box, asymKeysMapping }, accessToken) {
+  const {
+    id: boxId,
+    title,
+    serverCreatedAt,
+    consentEncryptedSecretKey: {
+      encryptionPublicKey,
+      encrypted,
+    },
+    publicKey,
+  } = box;
+
+  if (!encryptionPublicKey) {
+    throw new Error(`box ${boxId} has no consent_encrypted_secret_key.encryption_public_key`);
+  }
+
+  const secretKey = asymKeysMapping[encryptionPublicKey];
+  if (isEmpty(secretKey)) {
+    throw new Error(`no secret key for consent public key "${encryptionPublicKey}"`)
+  }
+
+  const { boxSecretKey } = JSON.parse(decryptText(encrypted, secretKey));
+
+  // we already have the box public key, this is just a check
+  const { publicKey: rebuiltPublicKey } = keyPairFromSecretKey(boxSecretKey);
+  if (rebuiltPublicKey !== publicKey) {
+    throw new Error(`rebuilt public key (${rebuiltPublicKey}) different from "official" box public key (${publicKey})`)
+  }
+
+  asymKeysMapping[publicKey] = boxSecretKey;
+
+  const encryptedMessages = await httpApi.listBoxMessages(boxId, accessToken);
+
+  return {
+    id: boxId,
+    title,
+    creationDate: serverCreatedAt,
+    messages: await Promise.all(encryptedMessages.map((event) =>
+      decryptBoxMessage({ event, boxSecretKey, boxPublicKey: publicKey }, accessToken)
+    )),
+  }
+}
+
 class MisakeyServer {
   constructor(orgId, authSecret, cryptoSecret) {
-    const err = validateProperties({ orgId, authSecret, cryptoSecret });
+    const err = validateProperties({ orgId, authSecret });
     if (err) { throw err; }
 
     this.orgId = orgId;
     this.authSecret = authSecret;
     this.accessToken = null;
+    this.accessTokenExpirationDate = null;
     this.cryptoSecret = cryptoSecret;
     this.secrets = {
       // mapping from public key to user key share
@@ -272,13 +378,17 @@ class MisakeyServer {
 
   async pushMessages({ messages, boxTitle, dataSubject, dataTag }) {
     assertNotAnyNil({ messages, boxTitle, dataSubject, dataTag });
-    
+
     if (!isArray(messages)) {
       throw Error('messages must be an array');
     }
 
-    if (!this.accessToken) {
-      this.accessToken = await httpApi.exchangeOrgToken(this.orgId, this.authSecret);
+    const currentDate = new Date();
+    if (!this.accessToken || (this.accessTokenExpirationDate !== null && this.accessTokenExpirationDate >= currentDate)) {
+      const { accessToken, expiresIn } = await httpApi.exchangeOrgToken(this.orgId, this.authSecret);
+      this.accessToken = accessToken;
+      currentDate.setSeconds(currentDate.getSeconds() + expiresIn - 30);
+      this.accessTokenExpirationDate = currentDate;
     }
 
     const {
@@ -372,12 +482,18 @@ class MisakeyServer {
   }
 
   async getData(dataSubject, datatag, producerOrgId) {
+    const currentDate = new Date();
+    if (!this.accessToken || (this.accessTokenExpirationDate !== null && this.accessTokenExpirationDate >= currentDate)) {
+      const { accessToken, expiresIn } = await httpApi.exchangeOrgToken(this.orgId, this.authSecret);
+      this.accessToken = accessToken;
+      currentDate.setSeconds(currentDate.getSeconds() + expiresIn - 30);
+      this.accessTokenExpirationDate = currentDate;
+    }
+
     // TODO better parallelism
     const secretStorage = await loadSecretStorage(this.cryptoSecret, this.accessToken);
-    console.log({ secretStorage });
     const { accountId } = await httpApi.getIdentity(this.orgId, this.accessToken);
     const asymKeysMapping = await loadConsentKeysFromCryptoActions(accountId, secretStorage.asymKeys, this.accessToken);
-    console.log({ asymKeysMapping });
 
     const {
       datatagId
@@ -385,36 +501,19 @@ class MisakeyServer {
 
     const boxes = await httpApi.listBoxes(dataSubject, datatagId, producerOrgId, this.accessToken);
 
-    // decrypting box secret keys
-    boxes.forEach((box) => {
-      const {
-        consentEncryptedSecretKey: {
-          encryptionPublicKey,
-          encrypted,
-        },
-        publicKey,
-      } = box;
+    const promisedDecryptedBoxes = boxes.map((box) =>
+      decryptBox({ box, asymKeysMapping }, this.accessToken).catch((error) => {
+        if (error.response) {
+          debuglog(`error decrypting box "%s": %s`, box.id, util.inspect(error.response, false, 3));
+        }
+        debuglog(`error decrypting box "%s": %s`, box.id, error);
+        return null;
+      })
+    )
 
-      const secretKey = asymKeysMapping[encryptionPublicKey];
-      if (isEmpty(secretKey)) {
-        throw new Error(`no secret key for public key ${encryptionPublicKey}`)
-      }
-
-      const { boxSecretKey } = JSON.parse(decryptText(encrypted, secretKey));
-
-      // we already have the box public key, this is just a check
-      const { publicKey: rebuiltPublicKey } = keyPairFromSecretKey(boxSecretKey);
-      if (rebuiltPublicKey !== publicKey) {
-        throw new Error(`rebuilt public key (${rebuiltPublicKey}) different from "official" box public key (${publicKey})`)
-      }
-
-      asymKeysMapping[publicKey] = boxSecretKey;
-    })
-
-    console.log({ boxes });
-    console.log({ asymKeysMapping });
-
-    // TODO decrypt box content using box secret keys
+    return {
+      boxes: compact(await Promise.all(promisedDecryptedBoxes)),
+    };
   }
 }
 

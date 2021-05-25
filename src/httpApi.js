@@ -230,8 +230,8 @@ async function exchangeOrgToken(orgId, authSecret) {
   form.append('client_id', orgId);
   form.append('client_secret', authSecret);
 
-  const { accessToken } = await exchangeToken(form);
-  return accessToken;
+  const { accessToken, expiresIn } = await exchangeToken(form);
+  return { accessToken, expiresIn };
 }
 
 async function exchangeUserToken(body) {
@@ -341,6 +341,42 @@ async function listBoxes(dataSubject, datatagId, producerOrgId, accessToken) {
   return objectToCamelCaseDeep(await response.json());
 }
 
+async function listBoxMessages(boxId, accessToken) {
+  const response = await fetch(
+    `${API_URL_PREFIX}/boxes/${boxId}/messages`,
+    {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    },
+  )
+  if (!response.ok) {
+    const error = new Error();
+    error.response = response;
+    throw error;
+  }
+
+  return objectToCamelCaseDeep(await response.json());
+}
+
+async function getEncryptedFile(encryptedFileId, accessToken) {
+  const response = await fetch(
+    `${API_URL_PREFIX}/encrypted-files/${encryptedFileId}`,
+    {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    },
+  )
+  if (!response.ok) {
+    const error = new Error();
+    error.response = response;
+    throw error;
+  }
+
+  return response.buffer();
+}
+
 module.exports = {
   BASE_TARGET_DOMAIN,
   AUTH_URL_PREFIX,
@@ -356,4 +392,6 @@ module.exports = {
   getIdentity,
   getCryptoActions,
   listBoxes,
+  listBoxMessages,
+  getEncryptedFile,
 };
