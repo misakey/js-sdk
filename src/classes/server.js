@@ -28,6 +28,10 @@ const httpApi = require('../httpApi');
 // unless node was run with "NODE_DEBUG=misakey-sdk" in its environment
 const debuglog = util.debuglog('misakey-sdk');
 
+function isAccessTokenExpired(accessToken, accessTokenExpirationDate, currentDate) {
+  return accessToken || (accessTokenExpirationDate !== null && accessTokenExpirationDate <= currentDate);
+}
+
 function ensureConsentPublicKey({ existingConsentPublicKey, dataSubjectPublicKey }) {
   if (existingConsentPublicKey) {
     return {
@@ -384,7 +388,7 @@ class MisakeyServer {
     }
 
     const currentDate = new Date();
-    if (!this.accessToken || (this.accessTokenExpirationDate !== null && this.accessTokenExpirationDate >= currentDate)) {
+    if (isAccessTokenExpired(this.accessToken, this.accessTokenExpirationDate, currentDate)) {
       const { accessToken, expiresIn } = await httpApi.exchangeOrgToken(this.orgId, this.authSecret);
       this.accessToken = accessToken;
       currentDate.setSeconds(currentDate.getSeconds() + expiresIn - 30);
@@ -483,7 +487,7 @@ class MisakeyServer {
 
   async getData(dataSubject, datatag, producerOrgId) {
     const currentDate = new Date();
-    if (!this.accessToken || (this.accessTokenExpirationDate !== null && this.accessTokenExpirationDate >= currentDate)) {
+    if (isAccessTokenExpired(this.accessToken, this.accessTokenExpirationDate, currentDate)) {
       const { accessToken, expiresIn } = await httpApi.exchangeOrgToken(this.orgId, this.authSecret);
       this.accessToken = accessToken;
       currentDate.setSeconds(currentDate.getSeconds() + expiresIn - 30);
