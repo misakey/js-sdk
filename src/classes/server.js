@@ -29,7 +29,7 @@ const httpApi = require('../httpApi');
 const debuglog = util.debuglog('misakey-sdk');
 
 function isAccessTokenExpired(accessToken, accessTokenExpirationDate, currentDate) {
-  return accessToken || (accessTokenExpirationDate !== null && accessTokenExpirationDate <= currentDate);
+  return isNil(accessToken) || (!isNil(accessTokenExpirationDate) && accessTokenExpirationDate <= currentDate);
 }
 
 function ensureConsentPublicKey({ existingConsentPublicKey, dataSubjectPublicKey }) {
